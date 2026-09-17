@@ -415,3 +415,38 @@ describe.skipIf(skip)("node:net seeded syscall fuzz", () => {
     }
   });
 });
+
+// An IPv6-less kernel (ipv6.disable=1) fails socket(AF_INET6) with EAFNOSUPPORT.
+// Node binds "::" when listen() gets no host and falls back to "0.0.0.0" there.
+describe.skipIf(skip)("node:net listen without IPv6 (socket(AF_INET6) → EAFNOSUPPORT)", () => {
+  const AF_INET6 = process.platform === "linux" ? 10 : 30;
+  const noIPv6 = () =>
+    fault.set({ syscall: "socket", action: "errno", errno: "EAFNOSUPPORT", fd: AF_INET6, repeat: -1 });
+
+  test("listen(port) with no host falls back to 0.0.0.0", async () => {
+    noIPv6();
+    const server = net.createServer();
+    server.listen(0);
+    await once(server, "listening");
+    const address = server.address() as net.AddressInfo;
+    server.close();
+    await once(server, "close");
+    expect(address).toEqual({ address: "0.0.0.0", family: "IPv4", port: address.port });
+  });
+
+  test("listen(port, '::') reports EAFNOSUPPORT instead of falling back", async () => {
+    noIPv6();
+    const server = net.createServer();
+    server.listen(0, "::");
+    const [err] = (await once(server, "error")) as [NodeJS.ErrnoException];
+    expect(err.code).toBe("EAFNOSUPPORT");
+    expect(err.syscall).toBe("listen");
+  });
+
+  test("Bun.listen({ hostname: '::' }) throws an error with code EAFNOSUPPORT", () => {
+    noIPv6();
+    expect(() => Bun.listen({ hostname: "::", port: 0, socket: { data() {} } })).toThrow(
+      expect.objectContaining({ code: "EAFNOSUPPORT", syscall: "listen", errno: expect.any(Number) }),
+    );
+  });
+});

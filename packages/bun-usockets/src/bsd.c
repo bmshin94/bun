@@ -694,6 +694,15 @@ LIBUS_SOCKET_DESCRIPTOR bsd_create_socket(int domain, int type, int protocol, in
         *err = 0;
     }
 
+    ssize_t injected = 0; int unused = 0;
+    if (US_FAULT_CHECK(US_FAULT_SOCKET, domain, injected, unused)) {
+        if (err != NULL) {
+            *err = LIBUS_ERR;
+        }
+        return LIBUS_SOCKET_ERROR;
+    }
+    (void)injected; (void)unused;
+
     LIBUS_SOCKET_DESCRIPTOR created_fd;
 #if defined(SOCK_CLOEXEC) && defined(SOCK_NONBLOCK)
     const int flags = SOCK_CLOEXEC | SOCK_NONBLOCK;
@@ -1368,7 +1377,7 @@ LIBUS_SOCKET_DESCRIPTOR bsd_create_listen_socket(const char *host, int port, int
     struct addrinfo *listenAddr;
     for (struct addrinfo *a = result; a != NULL; a = a->ai_next) {
         if (a->ai_family == AF_INET6) {
-            listenFd = bsd_create_socket(a->ai_family, a->ai_socktype, a->ai_protocol, NULL);
+            listenFd = bsd_create_socket(a->ai_family, a->ai_socktype, a->ai_protocol, error);
             if (listenFd == LIBUS_SOCKET_ERROR) {
                 continue;
             }
@@ -1385,7 +1394,7 @@ LIBUS_SOCKET_DESCRIPTOR bsd_create_listen_socket(const char *host, int port, int
 
     for (struct addrinfo *a = result; a != NULL; a = a->ai_next) {
         if (a->ai_family == AF_INET) {
-            listenFd = bsd_create_socket(a->ai_family, a->ai_socktype, a->ai_protocol, NULL);
+            listenFd = bsd_create_socket(a->ai_family, a->ai_socktype, a->ai_protocol, error);
             if (listenFd == LIBUS_SOCKET_ERROR) {
                 continue;
             }
