@@ -1,6 +1,6 @@
 use core::ffi::c_int;
 #[cfg(not(windows))]
-use core::ffi::{c_char, c_uint, c_void};
+use core::ffi::{c_uint, c_void};
 
 use bun_core;
 use bun_core::String as BunString;
