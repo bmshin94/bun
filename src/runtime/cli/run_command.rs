@@ -272,9 +272,6 @@ Full documentation is available at <magenta>https://bun.com/docs/cli/run<r>
         use_system_shell: bool,
         shell_path: Option<&[u8]>,
     ) -> crate::Result<()> {
-        let shell_search_path = shell_path.unwrap_or_else(|| env.get(b"PATH").unwrap_or(b""));
-        let shell_bin =
-            Self::find_shell(shell_search_path, cwd).ok_or(crate::Error::MissingShell)?;
         env.map
             .put(b"npm_lifecycle_event", name)
             .expect("unreachable");
@@ -368,6 +365,9 @@ Full documentation is available at <magenta>https://bun.com/docs/cli/run<r>
 
         use crate::api::bun_process::{Status as SpawnStatus, sync};
 
+        let shell_search_path = shell_path.unwrap_or_else(|| env.get(b"PATH").unwrap_or(b""));
+        let shell_bin =
+            Self::find_shell(shell_search_path, cwd).ok_or(crate::Error::MissingShell)?;
         let argv: Vec<Box<[u8]>> = vec![
             shell_bin.as_bytes().to_vec().into_boxed_slice(),
             if cfg!(windows) {

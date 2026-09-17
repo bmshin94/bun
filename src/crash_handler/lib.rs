@@ -1417,6 +1417,9 @@ mod draft {
         } else if name == b"MissingPackageJSON" {
             err_generic!("Bun could not find a package.json file to install from");
             bun_core::note!("Run \"bun init\" to initialize a project");
+        } else if name == b"MissingShell" {
+            err_generic!("Bun could not find a system shell (bash, sh, or zsh) to run this script");
+            bun_core::note!("Pass \"--shell=bun\" to bun run to use the built-in shell instead");
         } else {
             // The macros need
             // `:literal`, so branch on the const and call separately.
