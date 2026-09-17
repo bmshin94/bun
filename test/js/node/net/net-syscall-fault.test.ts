@@ -419,7 +419,8 @@ describe.skipIf(skip)("node:net seeded syscall fuzz", () => {
 // An IPv6-less kernel (ipv6.disable=1) fails socket(AF_INET6) with EAFNOSUPPORT.
 // Node binds "::" when listen() gets no host and falls back to "0.0.0.0" there.
 describe.skipIf(skip)("node:net listen without IPv6 (socket(AF_INET6) → EAFNOSUPPORT)", () => {
-  const AF_INET6 = process.platform === "linux" ? 10 : 30;
+  // The "socket" rule matches on the address family in place of an fd.
+  const AF_INET6 = process.platform === "darwin" ? 30 : process.platform === "freebsd" ? 28 : 10;
   const noIPv6 = () =>
     fault.set({ syscall: "socket", action: "errno", errno: "EAFNOSUPPORT", fd: AF_INET6, repeat: -1 });
 
