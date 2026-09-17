@@ -212,8 +212,8 @@ export function runSetupFunction(
       namespace = "file";
     }
 
-    if (!/^([/$a-zA-Z0-9_\\-]+)$/.test(namespace)) {
-      throw new TypeError("namespace can only contain $a-zA-Z0-9_\\-");
+    if (!/^([/@a-zA-Z0-9_\\-]+)$/.test(namespace)) {
+      throw new TypeError("namespace can only contain /@a-zA-Z0-9_\\-");
     }
 
     var callbacks = map.$get(namespace);

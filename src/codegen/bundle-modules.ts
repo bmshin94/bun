@@ -141,9 +141,9 @@ for (let i = 0; i < nativeStartIndex; i++) {
       true,
       x => requireTransformer(x, moduleList[i]),
     );
-    // Guard rail: builtin-parser.ts's regex-position heuristic only recognises
-    // `/` as regex-start after `[(,=;:{]|return|=>`; a regex whose body has `)`
-    // or `}` in any other position silently truncates. Fail loudly here.
+    // Guard rail: builtin-parser.ts takes a `/` after `)` or `}` as division, so
+    // a regex literal there is read as code and a `)` or `}` in its body
+    // silently truncates. Fail loudly here.
     if (processed.rest.trim() !== "") {
       throw new Error(
         `sliceSourceCode truncated ${moduleList[i]} — likely a regex literal in a position builtin-parser.ts doesn't recognise. ` +

@@ -1893,4 +1893,49 @@ describe("bundler", () => {
       }).toEqual({ success: true, logs: [], outputs: ["second-name.js"] });
     });
   }
+
+  // The namespace check allows "@" and "/" for names like "@scope/name". Its error message
+  // used to name "$" in their place, a character the check refuses.
+  test.concurrent("plugin/namespace error message names the characters the check accepts", async () => {
+    using dir = tempDir("plugin-namespace-characters", {
+      "entry.ts": `console.log("entry");`,
+    });
+    const accepted = ["file", "under_score", "with-dash", "@scope/name", "A1"];
+    const refused = ["a$b", "a.b", "a:b", "a b"];
+    const hooks = ["onResolve", "onLoad"] as const;
+    const results: [string, string][] = [];
+    const result = await Bun.build({
+      entrypoints: [join(String(dir), "entry.ts")],
+      throw: false,
+      plugins: [
+        {
+          name: "namespace-characters",
+          setup(build) {
+            for (const hook of hooks) {
+              for (const namespace of [...accepted, ...refused]) {
+                try {
+                  build[hook]({ filter: /^never-matches$/, namespace }, () => undefined);
+                  results.push([`${hook} ${namespace}`, "accepted"]);
+                } catch (e) {
+                  results.push([`${hook} ${namespace}`, `${(e as Error).name}: ${(e as Error).message}`]);
+                }
+              }
+            }
+          },
+        },
+      ],
+    });
+    expect(Object.fromEntries(results)).toEqual(
+      Object.fromEntries(
+        hooks.flatMap(hook => [
+          ...accepted.map(namespace => [`${hook} ${namespace}`, "accepted"]),
+          ...refused.map(namespace => [
+            `${hook} ${namespace}`,
+            "TypeError: namespace can only contain /@a-zA-Z0-9_\\-",
+          ]),
+        ]),
+      ),
+    );
+    expect({ success: result.success, logs: result.logs.map(log => log.message) }).toEqual({ success: true, logs: [] });
+  });
 });
