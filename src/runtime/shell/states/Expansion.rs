@@ -233,8 +233,7 @@ impl Expansion {
                         me.current_out.splice(0..0, home_bytes.iter().copied());
                     }
                     Some(_) => me.current_out.insert(0, b'~'),
-                    // `~""` expands to $HOME,
-                    // but `~$unset` expands to nothing (word is dropped).
+                    // `~""` is $HOME. `~$unset` is dropped, or stays `~` when no home is known.
                     None if me.has_quoted_empty || home.is_none() => {
                         me.current_out.extend_from_slice(home_bytes);
                     }
