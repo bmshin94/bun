@@ -440,8 +440,11 @@ describe.skipIf(skip)("node:net listen without IPv6 (socket(AF_INET6) → EAFNOS
     const server = net.createServer();
     server.listen(0, "::");
     const [err] = (await once(server, "error")) as [NodeJS.ErrnoException];
-    expect(err.code).toBe("EAFNOSUPPORT");
-    expect(err.syscall).toBe("listen");
+    expect({ code: err.code, syscall: err.syscall, message: err.message }).toEqual({
+      code: "EAFNOSUPPORT",
+      syscall: "listen",
+      message: "listen EAFNOSUPPORT: address family not supported ::",
+    });
   });
 
   test("Bun.listen({ hostname: '::' }) throws an error with code EAFNOSUPPORT", () => {

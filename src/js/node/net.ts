@@ -4378,6 +4378,8 @@ function uvListenErrorDescription(code) {
       return "address not available";
     case "EINVAL":
       return "invalid argument";
+    case "EAFNOSUPPORT":
+      return "address family not supported";
     default:
       return undefined;
   }
