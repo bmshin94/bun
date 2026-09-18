@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { bunEnv, bunExe } from "harness";
+import { bunEnv, bunExe, isASAN, isDebug, isLinux } from "harness";
 
 // bun-types does not declare the WebGPU globals (TypeScript's DOM lib and
 // @webgpu/types do), so this file reads them untyped.
@@ -1029,6 +1029,46 @@ describe.skipIf(!hasAdapter)("with a device", () => {
     device.destroy();
   });
 
+  test("a device and its listeners live for as long as script holds one of the device's objects", async () => {
+    const kinds: [string, (device: any) => any, (object: any) => unknown][] = [
+      [
+        "queue and buffer",
+        device => [device.queue, device.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST })],
+        ([queue, buffer]) => queue.writeBuffer(buffer, 0, new Uint8Array(64)),
+      ],
+      [
+        "texture",
+        device => device.createTexture({ size: [4, 4], format: "rgba8unorm", usage: GPUTextureUsage.TEXTURE_BINDING }),
+        texture => texture.createView({ format: "r8unorm" }),
+      ],
+      [
+        "compute pipeline",
+        device =>
+          device.createComputePipeline({
+            layout: "auto",
+            compute: { module: device.createShaderModule({ code: doubleShader }) },
+          }),
+        pipeline => pipeline.getBindGroupLayout(99),
+      ],
+      ["command encoder", device => device.createCommandEncoder(), encoder => (encoder.finish(), encoder.finish())],
+    ];
+    for (const [kind, create, misuse] of kinds) {
+      const uncaptured = Promise.withResolvers<string>();
+      // Only what `create` returns leaves this function: script has no reference to the device.
+      const object = await (async () => {
+        const device = await requestDevice();
+        device.addEventListener("uncapturederror", (event: any) => {
+          event.preventDefault();
+          uncaptured.resolve(`${kind}: ${event.error.constructor.name}`);
+        });
+        return create(device);
+      })();
+      Bun.gc(true);
+      misuse(object);
+      expect(await uncaptured.promise).toBe(`${kind}: GPUValidationError`);
+    }
+  });
+
   test("a call keeps the objects it reads alive while script collects garbage in the middle of it", async () => {
     await using proc = Bun.spawn({
       cmd: [
@@ -1162,12 +1202,25 @@ describe.skipIf(!hasAdapter)("with a device", () => {
   test("a shader that nests deeper than the stack of the calling thread", async () => {
     const device = await requestDevice();
     // naga recurses once per level of the shader, and its parser does not, so its own recursion
-    // limits never fire: these compile on a thread with a stack sized for the source.
-    for (const body of [
-      `let x = ${"!".repeat(4000)}true;`,
-      `var a = 1; let x = ${"*&".repeat(2000)}a;`,
+    // limits never fire: these compile on a thread whose stack is sized for how deep the source
+    // can nest. This depth overflows a stack sized for anything less (a debug build's frames are
+    // about 15 times larger, and an ASAN build sizes for those).
+    const depth = isDebug || isASAN ? 8000 : 30000;
+    const not = "!".repeat(depth);
+    const bodies = [
+      `let x = ${not}true;`,
+      `var a = 1; let x = ${"*&".repeat(depth / 2)}a;`,
       `var a = 1; if (a == 0) {} ${"else if (a == 1) {} ".repeat(600)}`,
-    ]) {
+      // One expression each: a ";" in a comment ends no statement, block comments nest, and a
+      // line comment ends at every line break of WGSL, so what follows it is code.
+      `let x = ${"!!!!!!!!/*;*/!!!!!!!!/*/*;*/;*/!!!!!!!!/*/;*/".repeat(depth / 24)}true;`,
+      `let x = //;\r${not}true;`,
+      `let x = //;\u2028${not}true;`,
+    ];
+    // The driver gets this one as it is (Metal's compiler has a nesting limit of its own). The
+    // others fold to a constant first.
+    if (isLinux) bodies.push(`var b = true; let x = ${not}b;`);
+    for (const body of bodies) {
       device.pushErrorScope("validation");
       const module = device.createShaderModule({ code: `@compute @workgroup_size(1) fn main() { ${body} }` });
       device.createComputePipeline({ layout: "auto", compute: { module } });
@@ -1176,7 +1229,30 @@ describe.skipIf(!hasAdapter)("with a device", () => {
     device.destroy();
   });
 
-  test("a shader too large for any compile thread gives an invalid module and pipeline", async () => {
+  test("a long shader that does not nest compiles", async () => {
+    const device = await requestDevice();
+    // The stack of the compile thread follows how deep the source can nest, not how long it is:
+    // sized from its length, this source would ask for more than a compile thread gets.
+    const statements: string[] = [];
+    for (let i = 0; i < 300; i++) statements.push(`x = x * 1.0001 + ${i}.5;`);
+    const code = `
+      // ${Buffer.alloc(1 << 19, "!;").toString()}
+      /* ${Buffer.alloc(1 << 19, "!{").toString()} */
+      @group(0) @binding(0) var<storage, read_write> data: array<f32>;
+      @compute @workgroup_size(1) fn main() {
+        var x = data[0];
+        ${statements.join("\n")}
+        data[0] = x;
+      }`;
+    device.pushErrorScope("validation");
+    const module = device.createShaderModule({ code });
+    device.createComputePipeline({ layout: "auto", compute: { module } });
+    expect(await device.popErrorScope()).toBeNull();
+    expect((await module.getCompilationInfo()).messages).toEqual([]);
+    device.destroy();
+  });
+
+  test("a shader that can nest deeper than any compile thread's stack gives an invalid module and pipeline", async () => {
     await using proc = Bun.spawn({
       cmd: [
         bunExe(),
@@ -1184,10 +1260,13 @@ describe.skipIf(!hasAdapter)("with a device", () => {
         `
           const adapter = await navigator.gpu.requestAdapter();
           const device = await adapter.requestDevice();
-          device.addEventListener("uncapturederror", event => event.preventDefault());
-          // The compile thread's stack is sized from the source. Where the system refuses that size, the
-          // calls take their fallback path. Where it does not, this source (one comment) compiles.
-          const code = "//" + Buffer.alloc(64 * 1024 * 1024, "a").toString() + "\\n@compute @workgroup_size(1) fn main() {}";
+          const errors = [];
+          device.addEventListener("uncapturederror", event => {
+            event.preventDefault();
+            errors.push(event.error.constructor.name);
+          });
+          // The stack this source asks for is more than a compile thread gets: nothing compiles it.
+          const code = "@compute @workgroup_size(1) fn main() { let x = " + Buffer.alloc(6 << 20, "!").toString() + "true; }";
           const module = device.createShaderModule({ code });
           function collect() {
             for (let i = 0; i < 2000; i++) ({ a: [i, {}, "x" + i] });
@@ -1198,7 +1277,9 @@ describe.skipIf(!hasAdapter)("with a device", () => {
             get layout() { return device.createPipelineLayout({ bindGroupLayouts: [] }); },
             compute: { module, constants: { get x() { collect(); return 1; } } },
           });
+          const info = await module.getCompilationInfo();
           console.log(module instanceof GPUShaderModule, pipeline instanceof GPUComputePipeline);
+          console.log(JSON.stringify(errors), info.messages.map(message => message.type).join());
         `,
       ],
       env: bunEnv,
@@ -1206,7 +1287,7 @@ describe.skipIf(!hasAdapter)("with a device", () => {
     });
     const [stdout, stderr, exitCode] = await Promise.all([proc.stdout.text(), proc.stderr.text(), proc.exited]);
     expect(stderr).toBe("");
-    expect(stdout).toBe("true true\n");
+    expect(stdout).toBe('true true\n["GPUValidationError","GPUValidationError"] error\n');
     expect(exitCode).toBe(0);
   });
 
@@ -1292,6 +1373,49 @@ describe.skipIf(!hasAdapter)("with a device", () => {
           pass.setPipeline(pipeline);
           pass.setBindGroup(0, bindGroup);
           pass.dispatchWorkgroups(1024);
+          pass.end();
+          device.queue.submit([encoder.finish()]);
+          console.log("submitted");
+          process.exit(0);
+        `,
+      ],
+      env: bunEnv,
+      stderr: "pipe",
+    });
+    const [stdout, stderr, exitCode] = await Promise.all([proc.stdout.text(), proc.stderr.text(), proc.exited]);
+    expect(stderr).toBe("");
+    expect(stdout).toBe("submitted\n");
+    expect(exitCode).toBe(0);
+  });
+
+  // Where the process leaves through libc's exit() (macOS, and every ASAN build), it first waits for the GPU.
+  test.skipIf(!isLinux || isASAN)("process.exit() does not wait for GPU work that never ends", async () => {
+    await using proc = Bun.spawn({
+      cmd: [
+        bunExe(),
+        "-e",
+        `
+          const adapter = await navigator.gpu.requestAdapter();
+          const device = await adapter.requestDevice();
+          const module = device.createShaderModule({
+            code: \`@group(0) @binding(0) var<storage, read_write> data: array<u32>;
+              @compute @workgroup_size(1) fn main() {
+                var x = data[0];
+                loop { x = x * 1664525u + 1013904223u; if (data[1] == 1u) { break; } }
+                data[0] = x;
+              }\`,
+          });
+          const pipeline = device.createComputePipeline({ layout: "auto", compute: { module } });
+          const data = device.createBuffer({ size: 64, usage: GPUBufferUsage.STORAGE });
+          const bindGroup = device.createBindGroup({
+            layout: pipeline.getBindGroupLayout(0),
+            entries: [{ binding: 0, resource: { buffer: data } }],
+          });
+          const encoder = device.createCommandEncoder();
+          const pass = encoder.beginComputePass();
+          pass.setPipeline(pipeline);
+          pass.setBindGroup(0, bindGroup);
+          pass.dispatchWorkgroups(1);
           pass.end();
           device.queue.submit([encoder.finish()]);
           console.log("submitted");
@@ -1485,6 +1609,77 @@ describe.skipIf(!hasAdapter)("with a device", () => {
     await Promise.all(pending);
     expect(frames).toBe(60);
     device.destroy();
+  });
+
+  test("a wait that a disposed Bun.ModuleGraph made does not stop the device's other waits", async () => {
+    const device = await requestDevice();
+    const buffer = device.createBuffer({ size: 16, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+    const graph = new Bun.ModuleGraph({});
+    let settled = 0;
+    // These start the device's poller from the graph's context, which stops before the poller is done.
+    graph.run(() => {
+      device.queue.onSubmittedWorkDone().then(() => settled++);
+      buffer.mapAsync(GPUMapMode.READ).then(
+        () => settled++,
+        () => settled++,
+      );
+    });
+    graph.dispose();
+    await device.queue.onSubmittedWorkDone();
+    const own = device.createBuffer({ size: 16, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+    await own.mapAsync(GPUMapMode.READ);
+    // The promises of a graph that was disposed stay pending.
+    expect(settled).toBe(0);
+    device.destroy();
+  });
+
+  test("a long wait for the GPU does not hold a thread of the work pool", async () => {
+    await using proc = Bun.spawn({
+      cmd: [
+        bunExe(),
+        "-e",
+        `
+          import { stat } from "node:fs/promises";
+          // As many devices as the pool has threads, each with a wait that never ends.
+          for (let i = 0; i < 2; i++) {
+            const adapter = await navigator.gpu.requestAdapter();
+            const device = await adapter.requestDevice();
+            const module = device.createShaderModule({
+              code: \`@group(0) @binding(0) var<storage, read_write> data: array<u32>;
+                @compute @workgroup_size(1) fn main() {
+                  var x = data[0];
+                  loop { x = x * 1664525u + 1013904223u; if (data[1] == 1u) { break; } }
+                  data[0] = x;
+                }\`,
+            });
+            const pipeline = device.createComputePipeline({ layout: "auto", compute: { module } });
+            const data = device.createBuffer({ size: 64, usage: GPUBufferUsage.STORAGE });
+            const bindGroup = device.createBindGroup({
+              layout: pipeline.getBindGroupLayout(0),
+              entries: [{ binding: 0, resource: { buffer: data } }],
+            });
+            const encoder = device.createCommandEncoder();
+            const pass = encoder.beginComputePass();
+            pass.setPipeline(pipeline);
+            pass.setBindGroup(0, bindGroup);
+            pass.dispatchWorkgroups(1);
+            pass.end();
+            device.queue.submit([encoder.finish()]);
+            device.queue.onSubmittedWorkDone();
+          }
+          // node:fs runs this on the pool.
+          await stat(process.execPath);
+          console.log("stat");
+        `,
+      ],
+      env: { ...bunEnv, UV_THREADPOOL_SIZE: "2" },
+      stderr: "pipe",
+    });
+    // Before the fix the two waits held both threads for as long as the shaders ran, which is for ever here.
+    const reader = proc.stdout.getReader();
+    const { value } = await reader.read();
+    expect(new TextDecoder().decode(value)).toBe("stat\n");
+    proc.kill();
   });
 
   test("unmap() only detaches its own ArrayBuffers, whatever script puts on Array.prototype", async () => {

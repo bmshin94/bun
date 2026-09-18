@@ -239,7 +239,7 @@ impl GPUBuffer {
             destroyed: Cell::new(false),
             invalid,
         };
-        let value = this.to_js(global);
+        let value = device.adopt(global, this.to_js(global), js::device_set_cached);
         if mapped {
             device.track_mapped(global, value);
         }

@@ -9,6 +9,8 @@ namespace Bun {
 
 using namespace JSC;
 
+extern "C" JSC::EncodedJSValue Bun__WebGPU__createGPU(JSC::JSGlobalObject*);
+
 static JSValue internalWebGPUModule(VM& vm, Zig::GlobalObject* globalObject)
 {
     return globalObject->internalModuleRegistry()->requireId(globalObject, vm, InternalModuleRegistry::InternalWebgpu);
@@ -46,10 +48,24 @@ JSC_DEFINE_CUSTOM_SETTER(setJSWebGPUGlobal, (JSGlobalObject * lexicalGlobalObjec
     return true;
 }
 
+// [SameObject]. The GPU is kept on internal/webgpu's exports object, which script cannot reach.
 JSC_DEFINE_HOST_FUNCTION(functionNavigatorGetGPU, (JSGlobalObject * lexicalGlobalObject, CallFrame*))
 {
+    auto& vm = getVM(lexicalGlobalObject);
+    auto scope = DECLARE_THROW_SCOPE(vm);
     auto* globalObject = defaultGlobalObject(lexicalGlobalObject);
-    return JSValue::encode(globalObject->m_gpuObject.getInitializedOnMainThread(globalObject));
+    JSValue module = internalWebGPUModule(vm, globalObject);
+    RETURN_IF_EXCEPTION(scope, {});
+    JSObject* exports = module.getObject();
+    if (!exports) [[unlikely]]
+        return JSValue::encode(jsUndefined());
+    const Identifier name = Identifier::fromString(vm, "gpu"_s);
+    if (JSValue gpu = exports->getDirect(vm, name))
+        return JSValue::encode(gpu);
+    JSValue gpu = JSValue::decode(Bun__WebGPU__createGPU(globalObject));
+    RETURN_IF_EXCEPTION(scope, {});
+    exports->putDirect(vm, name, gpu, PropertyAttribute::DontEnum | 0);
+    return JSValue::encode(gpu);
 }
 
 } // namespace Bun
