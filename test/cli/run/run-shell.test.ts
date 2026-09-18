@@ -98,6 +98,7 @@ describe.skipIf(!isLinux)("bun run on a system with no shell", () => {
 
   // The helper binary, or null when this host cannot build it (no cc, no kernel headers).
   const helper = (() => {
+    if (!isLinux) return null;
     const bin = join(tmpdirSync(), "hide-paths");
     const compile = spawnSync("cc", ["-O0", "-o", bin, join(import.meta.dir, "hide-paths.c")], { stdio: "pipe" });
     if ((compile.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") return null;
