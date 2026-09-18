@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "child_process";
 import { chmodSync, mkdirSync } from "fs";
-import { bunEnv, bunExe, isLinux, isWindows, tempDir, tmpdirSync } from "harness";
+import { bunEnv, bunExe, isLinux, isWindows, tempDir, tempDirWithFiles, tmpdirSync } from "harness";
 import { join } from "path";
 
 describe.concurrent("run-shell", () => {
@@ -86,7 +86,7 @@ test.skipIf(isWindows)(
 // this host cannot use it: no cc, no kernel headers, or a kernel or sandbox that refuses the filter.
 const hidePaths = (() => {
   if (!isLinux) return null;
-  const bin = join(tmpdirSync(), "hide-paths");
+  const bin = join(tempDirWithFiles("hide-paths", {}), "hide-paths");
   const compile = spawnSync("cc", ["-O0", "-o", bin, join(import.meta.dir, "hide-paths.c")], { stdio: "pipe" });
   if ((compile.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") return null;
   if (compile.status !== 0) {
