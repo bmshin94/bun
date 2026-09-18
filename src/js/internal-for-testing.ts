@@ -593,7 +593,6 @@ export type SocketFaultSyscall =
   | "recvmsg"
   | "connect"
   | "accept"
-  | "socket"
   | "ssl_loop_buffer"
   | "poll_start"
   | "session_buffer";
@@ -616,8 +615,6 @@ export type SocketFaultRule = {
     | "EINVAL"
     | "ENETUNREACH"
     | "EHOSTUNREACH"
-    | "EPROTOTYPE"
-    | "EAFNOSUPPORT"
     | number;
   /** clamp recv/send length to this many bytes; required and > 0 when action === "short" */
   bytes?: number;
@@ -625,7 +622,7 @@ export type SocketFaultRule = {
   after?: number;
   /** fire this many times then disarm; -1 = forever. Default 1. */
   repeat?: number;
-  /** match only this fd; -1 (default) = any. Rejected for "ssl_loop_buffer" and "session_buffer", which have no fd. For "socket" this is the address family (e.g. AF_INET6). */
+  /** match only this fd; -1 (default) = any. Rejected for "ssl_loop_buffer" and "session_buffer", which have no fd. */
   fd?: number;
 };
 

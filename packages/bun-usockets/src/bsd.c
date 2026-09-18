@@ -694,15 +694,6 @@ LIBUS_SOCKET_DESCRIPTOR bsd_create_socket(int domain, int type, int protocol, in
         *err = 0;
     }
 
-    ssize_t injected = 0; int unused = 0;
-    if (US_FAULT_CHECK(US_FAULT_SOCKET, domain, injected, unused)) {
-        if (err != NULL) {
-            *err = LIBUS_ERR;
-        }
-        return LIBUS_SOCKET_ERROR;
-    }
-    (void)injected; (void)unused;
-
     LIBUS_SOCKET_DESCRIPTOR created_fd;
 #if defined(SOCK_CLOEXEC) && defined(SOCK_NONBLOCK)
     const int flags = SOCK_CLOEXEC | SOCK_NONBLOCK;

@@ -5075,8 +5075,6 @@ pub mod testing_apis {
                 fi::CONNECT
             } else if syscall_str.eq_ascii(b"accept") {
                 fi::ACCEPT
-            } else if syscall_str.eq_ascii(b"socket") {
-                fi::SOCKET
             } else if syscall_str.eq_ascii(b"ssl_loop_buffer") {
                 fi::SSL_LOOP_BUFFER
             } else if syscall_str.eq_ascii(b"poll_start") {
@@ -5084,10 +5082,10 @@ pub mod testing_apis {
             } else if syscall_str.eq_ascii(b"session_buffer") {
                 fi::SESSION_BUFFER
             } else {
-                // close/shutdown have enum slots but no bsd.c hooks;
+                // socket/close/shutdown have enum slots but no bsd.c hooks;
                 // accepting them would arm rules that can never fire.
                 return Err(global.throw(format_args!(
-                    "rule.syscall must be one of: recv, send, writev, sendmsg, recvmsg, connect, accept, socket, ssl_loop_buffer, poll_start, session_buffer"
+                    "rule.syscall must be one of: recv, send, writev, sendmsg, recvmsg, connect, accept, ssl_loop_buffer, poll_start, session_buffer"
                 )));
             };
 
@@ -5149,7 +5147,7 @@ pub mod testing_apis {
                     let name = v.to_bun_string(global)?;
                     parse_errno_name(&name).ok_or_else(|| {
                         global.throw(format_args!(
-                            "rule.errno: unknown errno name (use a numeric value or one of: ECONNRESET, EPIPE, ETIMEDOUT, ECONNREFUSED, EAGAIN, EWOULDBLOCK, EINTR, ENOBUFS, ENOMEM, EBADF, EINVAL, ENETUNREACH, EHOSTUNREACH, EPROTOTYPE, EAFNOSUPPORT)"
+                            "rule.errno: unknown errno name (use a numeric value or one of: ECONNRESET, EPIPE, ETIMEDOUT, ECONNREFUSED, EAGAIN, EWOULDBLOCK, EINTR, ENOBUFS, ENOMEM, EBADF, EINVAL, ENETUNREACH, EHOSTUNREACH, EPROTOTYPE)"
                         ))
                     })?
                 }
@@ -5225,7 +5223,6 @@ pub mod testing_apis {
             b"ENETUNREACH" => libc::ENETUNREACH,
             b"EHOSTUNREACH" => libc::EHOSTUNREACH,
             b"EPROTOTYPE" => libc::EPROTOTYPE,
-            b"EAFNOSUPPORT" => libc::EAFNOSUPPORT,
         }
         #[cfg(windows)]
         map! {
@@ -5243,7 +5240,6 @@ pub mod testing_apis {
             b"ENETUNREACH" => 10051,
             b"EHOSTUNREACH" => 10065,
             b"EPROTOTYPE" => 10041,
-            b"EAFNOSUPPORT" => 10047,
         }
         None
     }

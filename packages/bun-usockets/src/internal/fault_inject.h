@@ -35,11 +35,8 @@ enum us_fault_syscall {
     US_FAULT_RECVMSG,
     US_FAULT_CONNECT,
     US_FAULT_ACCEPT,
-    /* socket(2) in bsd_create_socket. There is no fd yet, so the hook passes
-     * the address family in the fd slot: target_fd = AF_INET6 fails only
-     * IPv6 sockets (an IPv6-less kernel). Only US_FAULT_ERRNO applies. */
-    US_FAULT_SOCKET,
     /* Reserved: no bsd.c hooks yet, so the JS setter does not accept them. */
+    US_FAULT_SOCKET,
     US_FAULT_CLOSE,
     US_FAULT_SHUTDOWN,
     /* Not a syscall: the per-loop TLS plaintext buffer allocated once by
